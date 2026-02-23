@@ -4,32 +4,57 @@ import {
 
 const API_BASE = '/api';
 
+const handleResponse = async (res: Response) => {
+  const contentType = res.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Error ${res.status}: ${res.statusText}`);
+    return data;
+  } else {
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
+    return text; // Or throw if we strictly expect JSON
+  }
+};
+
 export const api = {
-  getLocomotives: () => fetch(`${API_BASE}/locomotives`).then(res => res.json()),
-  getTrains: () => fetch(`${API_BASE}/trains`).then(res => res.json()),
-  getShoulders: () => fetch(`${API_BASE}/shoulders`).then(res => res.json()),
-  getAssignments: () => fetch(`${API_BASE}/assignments`).then(res => res.json()),
-  getDashboardKPIs: () => fetch(`${API_BASE}/dashboard/kpis`).then(res => res.json()),
-  getStations: () => fetch(`${API_BASE}/stations`).then(res => res.json()),
-  getRecommendations: (shoulderId: number) => fetch(`${API_BASE}/recommend/${shoulderId}`).then(res => res.json()),
+  getLocomotives: () => fetch(`${API_BASE}/locomotives`).then(handleResponse),
+  getTrains: () => fetch(`${API_BASE}/trains`).then(handleResponse),
+  getShoulders: () => fetch(`${API_BASE}/shoulders`).then(handleResponse),
+  getAssignments: () => fetch(`${API_BASE}/assignments`).then(handleResponse),
+  getDashboardKPIs: () => fetch(`${API_BASE}/dashboard/kpis`).then(handleResponse),
+  getStations: () => fetch(`${API_BASE}/stations`).then(handleResponse),
+  getRecommendations: (shoulderId: number) => fetch(`${API_BASE}/recommend/${shoulderId}`).then(handleResponse),
   getGraphData: (from?: string, to?: string) => {
     const params = new URLSearchParams();
     if (from) params.append('from', from);
     if (to) params.append('to', to);
-    return fetch(`${API_BASE}/graph?${params}`).then(res => res.json());
+    return fetch(`${API_BASE}/graph?${params}`).then(handleResponse);
   },
-  getConflicts: () => fetch(`${API_BASE}/conflicts`).then(res => res.json()),
+  getConflicts: () => fetch(`${API_BASE}/conflicts`).then(handleResponse),
+  getEfficiency: (from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from) params.append('from', from);
+    if (to) params.append('to', to);
+    return fetch(`${API_BASE}/efficiency?${params}`).then(handleResponse);
+  },
+  getOptimization: (from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from) params.append('from', from);
+    if (to) params.append('to', to);
+    return fetch(`${API_BASE}/optimization?${params}`).then(handleResponse);
+  },
   importAssignments: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
     return fetch(`${API_BASE}/import/assignments`, {
       method: 'POST',
       body: formData
-    }).then(res => res.json());
+    }).then(handleResponse);
   },
   createAssignment: (data: any) => fetch(`${API_BASE}/assignments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
-  }).then(res => res.json()),
+  }).then(handleResponse),
 };

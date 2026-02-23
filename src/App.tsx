@@ -19,7 +19,8 @@ import {
   ChevronRight,
   Clock,
   Fuel,
-  Info
+  Info,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Timeline from 'react-calendar-timeline';
@@ -27,7 +28,7 @@ import 'react-calendar-timeline/dist/style.css';
 import dayjs from 'dayjs';
 import { api } from './api';
 import { 
-  Locomotive, Train, Shoulder, Assignment, DashboardKPIs, Station 
+  Locomotive, Train, Shoulder, Assignment, DashboardKPIs, Station, EfficiencyRecord, OptimizationSuggestion 
 } from './types';
 
 // --- Components ---
@@ -77,11 +78,32 @@ const Badge = ({ children, variant = "default" }: any) => {
 const Dashboard = () => {
   const [kpis, setKpis] = useState<DashboardKPIs | null>(null);
   const [recentAssignments, setRecentAssignments] = useState<Assignment[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getDashboardKPIs().then(setKpis);
-    api.getAssignments().then(data => setRecentAssignments(data.slice(0, 5)));
+    api.getDashboardKPIs()
+      .then(setKpis)
+      .catch(err => setError(err.message));
+    api.getAssignments()
+      .then(data => setRecentAssignments(data.slice(0, 5)))
+      .catch(err => console.error(err));
   }, []);
+
+  if (error) return (
+    <div className="p-6 bg-rose-50 border border-rose-100 rounded-xl text-rose-600">
+      <div className="flex items-center space-x-2 mb-2 font-bold">
+        <AlertTriangle size={20} />
+        <span>Ошибка загрузки данных</span>
+      </div>
+      <p className="text-sm">{error}</p>
+      <button 
+        onClick={() => window.location.reload()}
+        className="mt-4 px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-semibold"
+      >
+        Попробовать снова
+      </button>
+    </div>
+  );
 
   if (!kpis) return <div className="animate-pulse">Загрузка...</div>;
 
@@ -102,11 +124,11 @@ const Dashboard = () => {
         <Card className="border-l-4 border-l-emerald-500">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-sm text-slate-500 font-medium">Средний простой</p>
-              <h2 className="text-3xl font-bold mt-1">{kpis.avg_idle_hours}ч</h2>
+              <p className="text-sm text-slate-500 font-medium">Эффективность парка</p>
+              <h2 className="text-3xl font-bold mt-1">{kpis.fleet_efficiency}%</h2>
             </div>
             <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
-              <Clock size={24} />
+              <Activity size={24} />
             </div>
           </div>
         </Card>
@@ -124,11 +146,12 @@ const Dashboard = () => {
         <Card className="border-l-4 border-l-indigo-500">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-sm text-slate-500 font-medium">Локомотивы (Резерв)</p>
-              <h2 className="text-3xl font-bold mt-1">{kpis.loco_stats.reserve}</h2>
+              <p className="text-sm text-slate-500 font-medium">Самый загруженный</p>
+              <h2 className="text-xl font-bold mt-1">{kpis.busiest_loco}</h2>
+              <p className="text-[10px] text-slate-400 uppercase mt-1">Локомотив</p>
             </div>
             <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
-              <Activity size={24} />
+              <TrendingUp size={24} />
             </div>
           </div>
         </Card>
@@ -193,6 +216,127 @@ const Dashboard = () => {
   );
 };
 
+const EfficiencyPage = () => {
+  const [data, setData] = useState<EfficiencyRecord[]>([]);
+  const [suggestions, setSuggestions] = useState<OptimizationSuggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dateRange, setDateRange] = useState({
+    from: dayjs().subtract(7, 'day').format('YYYY-MM-DD'),
+    to: dayjs().format('YYYY-MM-DD')
+  });
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [eff, opt] = await Promise.all([
+        api.getEfficiency(dateRange.from, dateRange.to),
+        api.getOptimization(dateRange.from, dateRange.to)
+      ]);
+      setData(eff);
+      setSuggestions(opt);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const getEffColor = (eff: string) => {
+    const val = parseFloat(eff);
+    if (val > 85) return 'text-emerald-600 bg-emerald-50';
+    if (val > 70) return 'text-amber-600 bg-amber-50';
+    return 'text-rose-600 bg-rose-50';
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <h1 className="text-2xl font-bold text-slate-800">Эффективность парка</h1>
+        <div className="flex items-center space-x-4">
+          <input 
+            type="date" 
+            className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+            value={dateRange.from}
+            onChange={e => setDateRange({ ...dateRange, from: e.target.value })}
+          />
+          <input 
+            type="date" 
+            className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+            value={dateRange.to}
+            onChange={e => setDateRange({ ...dateRange, to: e.target.value })}
+          />
+          <button 
+            onClick={fetchData}
+            className="px-4 py-2 bg-ktz-blue text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+          >
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card title="Показатели локомотивов" className="lg:col-span-2">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-slate-400 text-xs uppercase tracking-wider border-b border-slate-100">
+                  <th className="pb-3 font-semibold">Локомотив</th>
+                  <th className="pb-3 font-semibold">Работа (ч)</th>
+                  <th className="pb-3 font-semibold">Простой (ч)</th>
+                  <th className="pb-3 font-semibold">Эффективность</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {data.map(row => (
+                  <tr key={row.locomotive_id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="py-4 font-bold text-slate-700">{row.locomotive_number}</td>
+                    <td className="py-4 text-slate-600">{row.total_run_hours}ч</td>
+                    <td className="py-4 text-slate-600">{row.total_idle_hours}ч</td>
+                    <td className="py-4">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${getEffColor(row.efficiency_percent)}`}>
+                        {row.efficiency_percent}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        <div className="space-y-6">
+          <Card title="Рекомендации по оптимизации">
+            <div className="space-y-4">
+              {suggestions.length > 0 ? suggestions.map((s, i) => (
+                <div key={i} className="p-4 bg-blue-50 border border-blue-100 rounded-xl">
+                  <div className="flex items-center space-x-2 text-ktz-blue mb-2">
+                    <TrendingUp size={16} />
+                    <span className="text-xs font-bold uppercase tracking-wider">Перераспределение</span>
+                  </div>
+                  <p className="text-sm text-slate-700 font-medium mb-1">
+                    Переназначить рейс {s.train_number}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {s.reason}
+                  </p>
+                </div>
+              )) : (
+                <div className="text-center py-8 text-slate-400">
+                  <p>Рекомендаций пока нет</p>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const GraphPage = () => {
   const [data, setData] = useState<{ groups: any[], items: any[] }>({ groups: [], items: [] });
   const [dateRange, setDateRange] = useState({
@@ -201,12 +345,16 @@ const GraphPage = () => {
   });
   const [selectedItem, setSelectedItem] = useState<any>(null);
 
-  useEffect(() => {
+  const fetchGraph = () => {
     api.getGraphData(
-      dayjs(dateRange.from).toISOString(), 
-      dayjs(dateRange.to).toISOString()
+      dayjs(dateRange.from).startOf('day').toISOString(), 
+      dayjs(dateRange.to).endOf('day').toISOString()
     ).then(setData);
-  }, [dateRange]);
+  };
+
+  useEffect(() => {
+    fetchGraph();
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -231,10 +379,17 @@ const GraphPage = () => {
               onChange={e => setDateRange({ ...dateRange, to: e.target.value })}
             />
           </div>
+          <button 
+            onClick={fetchGraph}
+            className="px-4 py-2 bg-ktz-blue text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+          >
+            Построить график
+          </button>
           <div className="h-8 w-px bg-slate-200 mx-2"></div>
           <div className="flex space-x-2">
-            <Badge variant="info">Планируемый</Badge>
+            <Badge variant="info">Рейс</Badge>
             <Badge variant="danger">Конфликт</Badge>
+            <Badge variant="default">Простой</Badge>
           </div>
         </div>
       </div>
@@ -366,12 +521,13 @@ const ImportPage = () => {
   const handleImport = async () => {
     if (!file) return;
     setLoading(true);
+    setResult(null);
     try {
       const res = await api.importAssignments(file);
       setResult(res);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Ошибка при импорте');
+      alert(err.message || 'Ошибка при импорте');
     } finally {
       setLoading(false);
     }
@@ -459,11 +615,11 @@ const ImportPage = () => {
               </div>
               <div className="text-center p-4 bg-amber-50 rounded-xl">
                 <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Ошибок</p>
-                <p className="text-xl font-bold text-amber-600">{result.errors.length}</p>
+                <p className="text-xl font-bold text-amber-600">{result.errors?.length || 0}</p>
               </div>
             </div>
 
-            {result.errors.length > 0 && (
+            {(result.errors?.length || 0) > 0 && (
               <div className="space-y-2">
                 <p className="font-bold text-slate-700">Журнал ошибок:</p>
                 <div className="overflow-x-auto">
@@ -503,10 +659,10 @@ const ConflictsPage = () => {
     api.getConflicts().then(setConflicts);
   }, []);
 
-  const filtered = conflicts.filter(c => 
+  const filtered = Array.isArray(conflicts) ? conflicts.filter(c => 
     c.loco_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.train_number?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  ) : [];
 
   return (
     <div className="space-y-6">
@@ -911,6 +1067,12 @@ export default function App() {
             onClick={() => setActiveTab('graph')} 
           />
           <SidebarItem 
+            icon={TrendingUp} 
+            label="Эффективность" 
+            active={activeTab === 'efficiency'} 
+            onClick={() => setActiveTab('efficiency')} 
+          />
+          <SidebarItem 
             icon={Activity} 
             label="Локомотивы" 
             active={activeTab === 'locomotives'} 
@@ -989,6 +1151,7 @@ export default function App() {
             >
               {activeTab === 'dashboard' && <Dashboard />}
               {activeTab === 'graph' && <GraphPage />}
+              {activeTab === 'efficiency' && <EfficiencyPage />}
               {activeTab === 'locomotives' && <LocomotiveList />}
               {activeTab === 'assignments' && <AssignmentManager />}
               {activeTab === 'import' && <ImportPage />}

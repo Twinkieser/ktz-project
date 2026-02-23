@@ -89,11 +89,30 @@ export interface ServiceLog {
 
 export interface DashboardKPIs {
   completed_rate: number;
-  avg_idle_hours: number;
+  fleet_efficiency: string;
+  busiest_loco: string;
+  idlest_loco: string;
   conflict_count: number;
   loco_stats: {
     working: number;
     service: number;
     reserve: number;
   };
+}
+
+export interface EfficiencyRecord {
+  locomotive_id: number;
+  locomotive_number: string;
+  total_run_hours: string;
+  total_idle_hours: string;
+  efficiency_percent: string;
+}
+
+export interface OptimizationSuggestion {
+  suggestion_type: string;
+  assignment_id?: number;
+  train_number?: string;
+  from_locomotive: string;
+  to_locomotive?: string;
+  reason: string;
 }
