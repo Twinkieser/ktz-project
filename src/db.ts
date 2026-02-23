@@ -61,8 +61,12 @@ db.exec(`
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
     status TEXT CHECK(status IN ('planned', 'active', 'completed', 'conflict')) DEFAULT 'planned',
-    conflict_reason TEXT
+    conflict_reason TEXT,
+    note TEXT
   );
+
+  CREATE INDEX IF NOT EXISTS idx_assignments_loco_time ON assignments(locomotive_id, start_time, end_time);
+  CREATE INDEX IF NOT EXISTS idx_assignments_status ON assignments(status);
 
   CREATE TABLE IF NOT EXISTS service_points (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

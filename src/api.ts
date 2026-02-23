@@ -12,6 +12,21 @@ export const api = {
   getDashboardKPIs: () => fetch(`${API_BASE}/dashboard/kpis`).then(res => res.json()),
   getStations: () => fetch(`${API_BASE}/stations`).then(res => res.json()),
   getRecommendations: (shoulderId: number) => fetch(`${API_BASE}/recommend/${shoulderId}`).then(res => res.json()),
+  getGraphData: (from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from) params.append('from', from);
+    if (to) params.append('to', to);
+    return fetch(`${API_BASE}/graph?${params}`).then(res => res.json());
+  },
+  getConflicts: () => fetch(`${API_BASE}/conflicts`).then(res => res.json()),
+  importAssignments: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return fetch(`${API_BASE}/import/assignments`, {
+      method: 'POST',
+      body: formData
+    }).then(res => res.json());
+  },
   createAssignment: (data: any) => fetch(`${API_BASE}/assignments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
