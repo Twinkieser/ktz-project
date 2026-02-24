@@ -4,7 +4,7 @@
  */
 
 export type LocoStatus = 'idle' | 'enroute' | 'service' | 'repair' | 'conflict';
-export type AssignmentStatus = 'planned' | 'active' | 'completed' | 'conflict';
+export type AssignmentStatus = 'planned' | 'active' | 'completed' | 'conflict' | 'violation';
 export type TrainCategory = 'passenger' | 'cargo';
 export type ServiceType = 'fuel' | 'sand' | 'inspection';
 
@@ -43,6 +43,15 @@ export interface Locomotive {
   sand_level: number;
   last_service_hours: number;
   total_hours: number;
+  max_run_km: number;
+  max_run_hours: number;
+  run_km_since_service: number;
+  run_hours_since_service: number;
+  fuel_capacity: number;
+  fuel_current: number;
+  fuel_rate_per_km: number;
+  home_depot_station_id?: number;
+  last_service_time?: string;
   current_station_name?: string;
 }
 
@@ -65,6 +74,10 @@ export interface Assignment {
   end_time: string; // ISO string
   status: AssignmentStatus;
   conflict_reason?: string;
+  violation_reason?: string;
+  distance_km?: number;
+  required_fuel?: number;
+  requires_service: number;
   loco_number?: string;
   train_number?: string;
   shoulder_name?: string;
@@ -105,6 +118,7 @@ export interface EfficiencyRecord {
   locomotive_number: string;
   total_run_hours: string;
   total_idle_hours: string;
+  total_service_hours: string;
   efficiency_percent: string;
 }
 

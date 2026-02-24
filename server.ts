@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import db from './src/db.ts';
 import { Assignment, Locomotive, DashboardKPIs } from './src/types.ts';
@@ -18,12 +19,46 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(cors({ origin: "*", credentials: false }));
+
+  // Request logging
+  app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+  });
 
   // --- API Routes ---
 
-  // Health check
+  // Healthcheck
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ ok: true });
+  });
+
+  // Perform Service
+  app.post('/api/locomotives/:id/service', (req, res) => {
+    const { id } = req.params;
+    const { station_id, service_type } = req.body;
+
+    const loco = db.prepare('SELECT * FROM locomotives WHERE id = ?').get(id) as any;
+    if (!loco) return res.status(404).json({ error: 'Locomotive not found' });
+
+    const now = dayjs().toISOString();
+    let fuelUpdate = '';
+    if (service_type === 'fuel' || service_type === 'full') {
+      fuelUpdate = ', fuel_current = fuel_capacity';
+    }
+
+    db.prepare(`
+      UPDATE locomotives 
+      SET run_km_since_service = 0, 
+          run_hours_since_service = 0, 
+          last_service_time = ?,
+          current_station_id = ?
+          ${fuelUpdate}
+      WHERE id = ?
+    `).run(now, station_id, id);
+
+    res.json({ message: 'Service completed successfully' });
   });
 
   // Get Graph Data with Idle Periods
@@ -49,18 +84,64 @@ async function startServer() {
       ORDER BY a.locomotive_id, a.start_time ASC
     `).all(endRange.toISOString(), startRange.toISOString()) as any[];
 
-    const locomotives = db.prepare('SELECT id, number FROM locomotives').all() as any[];
+    const locomotives = db.prepare('SELECT * FROM locomotives').all() as any[];
     const result: any[] = [];
 
     locomotives.forEach(loco => {
       const locoAssignments = assignments.filter(a => a.locomotive_id === loco.id);
       
+      // Track state for violation checks
+      let currentFuel = loco.fuel_current;
+      let currentKm = loco.run_km_since_service;
+      let currentHours = loco.run_hours_since_service;
+      let lastEndTime: dayjs.Dayjs | null = null;
+
       // Add actual assignments
       locoAssignments.forEach(a => {
+        const aStart = dayjs(a.start_time);
+        const aEnd = dayjs(a.end_time);
+        const durationHours = aEnd.diff(aStart, 'hour', true);
+        
+        let status = a.status;
+        let violationReason = '';
+
+        // 1. Turnaround + Fueling check
+        if (lastEndTime) {
+          const buffer = 40 + 30; // turnaround + fueling
+          if (aStart.diff(lastEndTime, 'minute') < buffer) {
+            status = 'violation';
+            violationReason = 'Not enough time for fueling/turnaround';
+          }
+        }
+
+        // 2. Fuel check
+        const requiredFuel = a.distance_km ? a.distance_km * loco.fuel_rate_per_km : 0;
+        if (currentFuel < requiredFuel) {
+          status = 'violation';
+          violationReason = 'Not enough fuel';
+        }
+
+        // 3. Maintenance check
+        if (currentKm > loco.max_run_km || currentHours > loco.max_run_hours) {
+          status = 'violation';
+          violationReason = 'Service required (limit exceeded)';
+        }
+
         result.push({
           ...a,
+          status,
+          violation_reason: violationReason,
+          required_fuel: requiredFuel,
           type: 'assignment'
         });
+
+        // Update state for next assignment in loop
+        if (status !== 'violation') {
+          currentFuel -= requiredFuel;
+          currentKm += (a.distance_km || 0);
+          currentHours += durationHours;
+        }
+        lastEndTime = aEnd;
       });
 
       // Calculate Idle periods
@@ -105,13 +186,15 @@ async function startServer() {
       end_time: dayjs(a.end_time).valueOf(),
       className: a.status === 'conflict' 
         ? 'bg-rose-500 border-rose-700 text-white' 
-        : a.status === 'idle' 
-          ? 'bg-slate-200 border-slate-300 text-slate-500 opacity-50'
-          : 'bg-ktz-blue border-blue-800 text-white',
+        : a.status === 'violation'
+          ? 'bg-amber-500 border-amber-700 text-white'
+          : a.status === 'idle' 
+            ? 'bg-slate-200 border-slate-300 text-slate-500 opacity-50'
+            : 'bg-ktz-blue border-blue-800 text-white',
       itemProps: {
         'data-tooltip': a.type === 'idle' 
           ? `Простой: ${dayjs(a.start_time).format('HH:mm')} - ${dayjs(a.end_time).format('HH:mm')}`
-          : `${a.train_number} | ${a.from_station}→${a.to_station} | ${a.status} ${a.conflict_reason || ''}`
+          : `${a.train_number} | ${a.from_station}→${a.to_station} | ${a.status} ${a.violation_reason || a.conflict_reason || ''} | Dist: ${a.distance_km || 0}km | Fuel: ${a.required_fuel?.toFixed(1) || 0}L`
       },
       ...a
     }));
@@ -145,15 +228,22 @@ async function startServer() {
         }
       });
 
+      // Calculate Service Time (mocked for now as time spent in 'service' status or between assignments if marked)
+      // In a real app, we'd have a separate table for service events
+      const serviceTimeMinutes = 0; 
+
       const totalPeriodMinutes = endRange.diff(startRange, 'minute');
-      const totalIdleMinutes = Math.max(0, totalPeriodMinutes - totalRunMinutes);
-      const efficiency = totalPeriodMinutes > 0 ? (totalRunMinutes / totalPeriodMinutes) * 100 : 0;
+      const totalAvailableMinutes = totalPeriodMinutes - serviceTimeMinutes;
+      const totalIdleMinutes = Math.max(0, totalAvailableMinutes - totalRunMinutes);
+      
+      const efficiency = totalAvailableMinutes > 0 ? (totalRunMinutes / totalAvailableMinutes) * 100 : 0;
 
       return {
         locomotive_id: loco.id,
         locomotive_number: loco.number,
         total_run_hours: (totalRunMinutes / 60).toFixed(1),
         total_idle_hours: (totalIdleMinutes / 60).toFixed(1),
+        total_service_hours: (serviceTimeMinutes / 60).toFixed(1),
         efficiency_percent: efficiency.toFixed(1)
       };
     });
@@ -170,7 +260,7 @@ async function startServer() {
     const assignments = db.prepare(`
       SELECT a.*, l.number as loco_num FROM assignments a 
       JOIN locomotives l ON a.locomotive_id = l.id
-      WHERE status = 'conflict'
+      WHERE a.status = 'conflict'
     `).all() as any[];
 
     assignments.forEach(a => {
@@ -288,7 +378,7 @@ async function startServer() {
 
       const normalizeStatus = (s: string) => {
         const v = String(s || '').toLowerCase().trim();
-        if (['planned', 'active', 'completed', 'conflict'].includes(v)) return v;
+        if (['planned', 'active', 'completed', 'conflict', 'violation'].includes(v)) return v;
         return 'planned';
       };
 
@@ -378,12 +468,16 @@ async function startServer() {
 
             status = normalizeStatus(status);
 
+            const distance_km = row.distance_km || row["Расстояние"] || null;
+            const fuel_rate = 2.5; // Default rate
+            const required_fuel = distance_km ? distance_km * fuel_rate : null;
+
             console.log("Inserting assignment:", { locoId, trainNum, sA, sB, startTime, endTime, status });
 
             db.prepare(`
-              INSERT INTO assignments (locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason, note)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(locoId, train.id, shoulder.id, startTime, endTime, status, conflictReason, note);
+              INSERT INTO assignments (locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason, note, distance_km, required_fuel)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(locoId, train.id, shoulder.id, startTime, endTime, status, conflictReason, note, distance_km, required_fuel);
 
             importedCount++;
           } catch (err: any) {
@@ -482,7 +576,7 @@ async function startServer() {
   });
 
   app.post('/api/assignments', (req, res) => {
-    const { locomotive_id, train_id, shoulder_id, start_time, end_time } = req.body;
+    const { locomotive_id, train_id, shoulder_id, start_time, end_time, note } = req.body;
     
     // Conflict check before insert
     const existing = db.prepare(`
@@ -500,9 +594,9 @@ async function startServer() {
     }
 
     const result = db.prepare(`
-      INSERT INTO assignments (locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason);
+      INSERT INTO assignments (locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason, note);
 
     res.json({ id: result.lastInsertRowid, status, conflict_reason });
   });
@@ -591,7 +685,7 @@ async function startServer() {
 
   // Stations
   app.get('/api/stations', (req, res) => {
-    const stations = db.prepare('SELECT * FROM stations').all();
+    const stations = db.prepare('SELECT id, name, code FROM stations').all();
     res.json(stations);
   });
 

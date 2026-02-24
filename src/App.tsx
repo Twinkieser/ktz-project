@@ -13,6 +13,7 @@ import {
   ClipboardList, 
   Map, 
   LogOut,
+  X,
   Plus,
   Search,
   Filter,
@@ -114,7 +115,7 @@ const Dashboard = () => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm text-slate-500 font-medium">Выполнено рейсов</p>
-              <h2 className="text-3xl font-bold mt-1">{kpis.completed_rate.toFixed(1)}%</h2>
+              <h2 className="text-3xl font-bold mt-1">{(kpis.completed_rate || 0).toFixed(1)}%</h2>
             </div>
             <div className="p-2 bg-blue-50 rounded-lg text-ktz-blue">
               <ClipboardList size={24} />
@@ -287,6 +288,7 @@ const EfficiencyPage = () => {
                   <th className="pb-3 font-semibold">Локомотив</th>
                   <th className="pb-3 font-semibold">Работа (ч)</th>
                   <th className="pb-3 font-semibold">Простой (ч)</th>
+                  <th className="pb-3 font-semibold">Сервис (ч)</th>
                   <th className="pb-3 font-semibold">Эффективность</th>
                 </tr>
               </thead>
@@ -296,6 +298,7 @@ const EfficiencyPage = () => {
                     <td className="py-4 font-bold text-slate-700">{row.locomotive_number}</td>
                     <td className="py-4 text-slate-600">{row.total_run_hours}ч</td>
                     <td className="py-4 text-slate-600">{row.total_idle_hours}ч</td>
+                    <td className="py-4 text-amber-600 font-medium">{row.total_service_hours}ч</td>
                     <td className="py-4">
                       <span className={`px-3 py-1 rounded-full text-xs font-bold ${getEffColor(row.efficiency_percent)}`}>
                         {row.efficiency_percent}%
@@ -339,6 +342,7 @@ const EfficiencyPage = () => {
 
 const GraphPage = () => {
   const [data, setData] = useState<{ groups: any[], items: any[] }>({ groups: [], items: [] });
+  const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState({
     from: dayjs().subtract(3, 'day').format('YYYY-MM-DD'),
     to: dayjs().add(3, 'day').format('YYYY-MM-DD')
@@ -346,10 +350,17 @@ const GraphPage = () => {
   const [selectedItem, setSelectedItem] = useState<any>(null);
 
   const fetchGraph = () => {
+    setLoading(true);
     api.getGraphData(
       dayjs(dateRange.from).startOf('day').toISOString(), 
       dayjs(dateRange.to).endOf('day').toISOString()
-    ).then(setData);
+    ).then(res => {
+      setData(res);
+      setLoading(false);
+    }).catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
   };
 
   useEffect(() => {
@@ -391,50 +402,65 @@ const GraphPage = () => {
             <Badge variant="danger">Конфликт</Badge>
             <Badge variant="default">Простой</Badge>
           </div>
+          <div className="text-xs text-slate-400 ml-4">
+            Групп: {data.groups.length} | Элементов: {data.items.length}
+          </div>
         </div>
       </div>
 
-      <Card className="p-0 overflow-hidden border-none shadow-lg">
-        <div className="timeline-container">
-          <Timeline
-            groups={data.groups}
-            items={data.items}
-            keys={{
-              groupIdKey: 'id',
-              groupTitleKey: 'title',
-              groupRightTitleKey: 'rightTitle',
-              groupLabelKey: 'label',
-              itemIdKey: 'id',
-              itemTitleKey: 'title',
-              itemDivTitleKey: 'title',
-              itemGroupKey: 'group',
-              itemTimeStartKey: 'start_time',
-              itemTimeEndKey: 'end_time'
-            }}
-            defaultTimeStart={dayjs().subtract(12, 'hour').valueOf()}
-            defaultTimeEnd={dayjs().add(12, 'hour').valueOf()}
-            lineHeight={60}
-            itemHeightRatio={0.75}
-            canMove={false}
-            canResize={false}
-            stackItems
-            sidebarWidth={150}
-            rightSidebarWidth={0}
-            minZoom={60 * 60 * 1000}
-            maxZoom={365 * 24 * 60 * 60 * 1000}
-            onItemClick={(itemId) => {
-              const item = data.items.find(i => i.id === itemId);
-              setSelectedItem(item);
-            }}
-            timeSteps={{
-              second: 1,
-              minute: 1,
-              hour: 1,
-              day: 1,
-              month: 1,
-              year: 1
-            }}
-          />
+      <Card className="p-0 overflow-hidden border-none shadow-lg h-[600px] relative">
+        {loading && (
+          <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
+            <div className="w-10 h-10 border-4 border-ktz-blue border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        )}
+        <div className="timeline-container h-full">
+          {!loading && data.groups.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-400">
+              <Map size={48} className="mb-4 opacity-20" />
+              <p>Нет данных для отображения. Попробуйте изменить период или импортировать данные.</p>
+            </div>
+          ) : (
+            <Timeline
+              groups={data.groups}
+              items={data.items}
+              keys={{
+                groupIdKey: 'id',
+                groupTitleKey: 'title',
+                groupRightTitleKey: 'rightTitle',
+                groupLabelKey: 'label',
+                itemIdKey: 'id',
+                itemTitleKey: 'title',
+                itemDivTitleKey: 'title',
+                itemGroupKey: 'group',
+                itemTimeStartKey: 'start_time',
+                itemTimeEndKey: 'end_time'
+              }}
+              defaultTimeStart={dayjs().subtract(12, 'hour').valueOf()}
+              defaultTimeEnd={dayjs().add(12, 'hour').valueOf()}
+              lineHeight={60}
+              itemHeightRatio={0.75}
+              canMove={false}
+              canResize={false}
+              stackItems
+              sidebarWidth={150}
+              rightSidebarWidth={0}
+              minZoom={60 * 60 * 1000}
+              maxZoom={365 * 24 * 60 * 60 * 1000}
+              onItemClick={(itemId) => {
+                const item = data.items.find(i => i.id === itemId);
+                setSelectedItem(item);
+              }}
+              timeSteps={{
+                second: 1,
+                minute: 1,
+                hour: 1,
+                day: 1,
+                month: 1,
+                year: 1
+              }}
+            />
+          )}
         </div>
       </Card>
 
@@ -450,7 +476,7 @@ const GraphPage = () => {
               <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                 <h2 className="font-bold text-slate-800">Детали подвязки #{selectedItem.id}</h2>
                 <button onClick={() => setSelectedItem(null)} className="text-slate-400 hover:text-slate-600">
-                  <LogOut size={20} />
+                  <X size={20} />
                 </button>
               </div>
               <div className="p-6 space-y-4">
@@ -472,16 +498,32 @@ const GraphPage = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Статус:</span>
-                  <Badge variant={selectedItem.status === 'conflict' ? 'danger' : 'info'}>
+                  <Badge variant={selectedItem.status === 'conflict' ? 'danger' : selectedItem.status === 'violation' ? 'warning' : 'info'}>
                     {selectedItem.status}
                   </Badge>
                 </div>
+                {selectedItem.violation_reason && (
+                  <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-amber-700 text-sm">
+                    <p className="font-bold mb-1">Нарушение правил:</p>
+                    {selectedItem.violation_reason}
+                  </div>
+                )}
                 {selectedItem.conflict_reason && (
                   <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-600 text-sm">
                     <p className="font-bold mb-1">Причина конфликта:</p>
                     {selectedItem.conflict_reason}
                   </div>
                 )}
+                <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <p className="text-slate-400 uppercase font-bold mb-1">Дистанция</p>
+                    <p className="text-slate-700 font-medium">{selectedItem.distance_km || 0} км</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 uppercase font-bold mb-1">Топливо</p>
+                    <p className="text-slate-700 font-medium">{selectedItem.required_fuel?.toFixed(1) || 0} л</p>
+                  </div>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -651,7 +693,7 @@ const ImportPage = () => {
   );
 };
 
-const ConflictsPage = () => {
+const ConflictsPage = ({ setActiveTab }: { setActiveTab: (tab: string) => void }) => {
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -709,7 +751,10 @@ const ConflictsPage = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button className="text-ktz-blue hover:underline text-sm font-medium">
+                    <button 
+                      onClick={() => setActiveTab('graph')}
+                      className="text-ktz-blue hover:underline text-sm font-medium"
+                    >
                       Показать на графике
                     </button>
                   </td>
@@ -733,10 +778,26 @@ const ConflictsPage = () => {
 const LocomotiveList = () => {
   const [locos, setLocos] = useState<Locomotive[]>([]);
   const [filter, setFilter] = useState('');
+  const [servicing, setServicing] = useState<number | null>(null);
+
+  const refresh = () => api.getLocomotives().then(setLocos);
 
   useEffect(() => {
-    api.getLocomotives().then(setLocos);
+    refresh();
   }, []);
+
+  const handleService = async (id: number) => {
+    if (!confirm('Выполнить полное обслуживание локомотива?')) return;
+    setServicing(id);
+    try {
+      await api.performService(id, { station_id: 1, service_type: 'full' });
+      await refresh();
+    } catch (err) {
+      alert('Ошибка при выполнении обслуживания');
+    } finally {
+      setServicing(null);
+    }
+  };
 
   const filtered = locos.filter(l => 
     l.number.toLowerCase().includes(filter.toLowerCase()) || 
@@ -760,56 +821,95 @@ const LocomotiveList = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filtered.map(l => (
-          <motion.div layout key={l.id}>
-            <Card className="hover:shadow-md transition-shadow cursor-pointer group">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-800 group-hover:text-ktz-blue transition-colors">{l.number}</h3>
-                  <p className="text-sm text-slate-500">{l.model} • {l.depot}</p>
-                </div>
-                <Badge variant={l.status === 'idle' ? 'success' : l.status === 'enroute' ? 'info' : 'warning'}>
-                  {l.status}
-                </Badge>
-              </div>
-              
-              <div className="space-y-3">
-                <div className="flex items-center text-sm text-slate-600">
-                  <Map size={14} className="mr-2 opacity-50" />
-                  <span>{l.current_station_name || 'Неизвестно'}</span>
+        {filtered.map(l => {
+          const fuelPct = (l.fuel_current / l.fuel_capacity) * 100;
+          const kmPct = (l.run_km_since_service / l.max_run_km) * 100;
+          const hrPct = (l.run_hours_since_service / l.max_run_hours) * 100;
+          const needsService = kmPct > 90 || hrPct > 90 || fuelPct < 15;
+
+          return (
+            <motion.div layout key={l.id}>
+              <Card className={`hover:shadow-md transition-shadow group ${needsService ? 'border-amber-200 bg-amber-50/10' : ''}`}>
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800 group-hover:text-ktz-blue transition-colors">{l.number}</h3>
+                    <p className="text-sm text-slate-500">{l.model} • {l.depot}</p>
+                  </div>
+                  <Badge variant={l.status === 'idle' ? 'success' : l.status === 'enroute' ? 'info' : 'warning'}>
+                    {l.status}
+                  </Badge>
                 </div>
                 
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs font-medium text-slate-500">
-                    <span>Топливо</span>
-                    <span>{l.fuel_level}%</span>
+                <div className="space-y-4">
+                  <div className="flex items-center text-sm text-slate-600">
+                    <Map size={14} className="mr-2 opacity-50" />
+                    <span>{l.current_station_name || 'Неизвестно'}</span>
                   </div>
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full ${l.fuel_level < 20 ? 'bg-rose-500' : 'bg-ktz-blue'}`} 
-                      style={{ width: `${l.fuel_level}%` }}
-                    ></div>
+                  
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs font-medium text-slate-500">
+                      <span>Топливо ({(l.fuel_current || 0).toFixed(0)}/{(l.fuel_capacity || 0)}л)</span>
+                      <span>{(fuelPct || 0).toFixed(0)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full ${fuelPct < 20 ? 'bg-rose-500' : 'bg-ktz-blue'}`} 
+                        style={{ width: `${fuelPct || 0}%` }}
+                      ></div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs font-medium text-slate-500">
-                    <span>Песок</span>
-                    <span>{l.sand_level}%</span>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs font-medium text-slate-500">
+                      <span>Пробег до ТО ({(l.run_km_since_service || 0)}/{(l.max_run_km || 0)}км)</span>
+                      <span>{(kmPct || 0).toFixed(0)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full ${kmPct > 90 ? 'bg-rose-500' : 'bg-amber-400'}`} 
+                        style={{ width: `${kmPct || 0}%` }}
+                      ></div>
+                    </div>
                   </div>
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div className="bg-amber-400 h-full" style={{ width: `${l.sand_level}%` }}></div>
-                  </div>
-                </div>
 
-                <div className="pt-2 border-t border-slate-50 flex justify-between items-center text-xs text-slate-400">
-                  <span>Наработка: {l.total_hours}ч</span>
-                  <span>ТО через: {500 - l.last_service_hours}ч</span>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs font-medium text-slate-500">
+                      <span>Часы до ТО ({(l.run_hours_since_service || 0).toFixed(1)}/{(l.max_run_hours || 0)}ч)</span>
+                      <span>{(hrPct || 0).toFixed(0)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full ${hrPct > 90 ? 'bg-rose-500' : 'bg-indigo-400'}`} 
+                        style={{ width: `${hrPct || 0}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-100">
+                    <button 
+                      onClick={() => handleService(l.id)}
+                      disabled={servicing === l.id}
+                      className={`w-full py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center space-x-2 ${
+                        needsService 
+                          ? 'bg-amber-500 text-white hover:bg-amber-600' 
+                          : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                    >
+                      {servicing === l.id ? (
+                        <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                      ) : (
+                        <>
+                          <Settings size={14} />
+                          <span>Обслуживание</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </Card>
-          </motion.div>
-        ))}
+              </Card>
+            </motion.div>
+          );
+        })}
       </div>
     </div>
   );
@@ -826,7 +926,8 @@ const AssignmentManager = () => {
     shoulder_id: '',
     locomotive_id: '',
     start_time: new Date().toISOString().slice(0, 16),
-    end_time: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 16)
+    end_time: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 16),
+    note: ''
   });
 
   useEffect(() => {
@@ -852,6 +953,14 @@ const AssignmentManager = () => {
     e.preventDefault();
     await api.createAssignment(formData);
     setShowModal(false);
+    setFormData({
+      train_id: '',
+      shoulder_id: '',
+      locomotive_id: '',
+      start_time: new Date().toISOString().slice(0, 16),
+      end_time: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 16),
+      note: ''
+    });
     refreshData();
   };
 
@@ -879,6 +988,7 @@ const AssignmentManager = () => {
                 <th className="pb-3 font-semibold">Плечо</th>
                 <th className="pb-3 font-semibold">Начало</th>
                 <th className="pb-3 font-semibold">Конец</th>
+                <th className="pb-3 font-semibold">Примечание</th>
                 <th className="pb-3 font-semibold">Статус</th>
               </tr>
             </thead>
@@ -891,6 +1001,9 @@ const AssignmentManager = () => {
                   <td className="py-4 text-sm text-slate-500">{a.shoulder_name}</td>
                   <td className="py-4 text-sm">{new Date(a.start_time).toLocaleString('ru-RU')}</td>
                   <td className="py-4 text-sm">{new Date(a.end_time).toLocaleString('ru-RU')}</td>
+                  <td className="py-4 text-sm text-slate-500 max-w-[200px] truncate" title={a.note}>
+                    {a.note || '-'}
+                  </td>
                   <td className="py-4">
                     <div className="flex flex-col">
                       <Badge variant={a.status === 'conflict' ? 'danger' : a.status === 'completed' ? 'success' : 'info'}>
@@ -923,7 +1036,7 @@ const AssignmentManager = () => {
               <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center">
                 <h2 className="text-xl font-bold text-slate-800">Создание подвязки</h2>
                 <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">
-                  <LogOut size={20} />
+                  <X size={20} />
                 </button>
               </div>
               <form onSubmit={handleSubmit} className="p-8 space-y-6">
@@ -1012,6 +1125,16 @@ const AssignmentManager = () => {
                   </div>
                 </div>
 
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-700">Примечание</label>
+                  <textarea 
+                    className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-ktz-blue/20 min-h-[100px]"
+                    placeholder="Введите дополнительную информацию..."
+                    value={formData.note}
+                    onChange={e => setFormData({ ...formData, note: e.target.value })}
+                  />
+                </div>
+
                 <div className="pt-6 flex space-x-4">
                   <button 
                     type="button"
@@ -1038,6 +1161,13 @@ const AssignmentManager = () => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api.checkHealth()
+      .then(() => setApiOnline(true))
+      .catch(() => setApiOnline(false));
+  }, []);
 
   return (
     <div className="flex h-screen bg-ktz-gray overflow-hidden">
@@ -1130,6 +1260,18 @@ export default function App() {
             <span className="font-medium text-slate-800 capitalize">{activeTab}</span>
           </div>
           <div className="flex items-center space-x-4">
+            {apiOnline === false && (
+              <div className="flex items-center space-x-2 px-3 py-1 bg-rose-50 text-rose-700 rounded-full text-xs font-bold border border-rose-100">
+                <AlertTriangle size={14} />
+                <span>API Offline: запустите сервер</span>
+              </div>
+            )}
+            {apiOnline === true && (
+              <div className="flex items-center space-x-2 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                <span>API Online</span>
+              </div>
+            )}
             <div className="flex items-center space-x-2 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
               <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
               <span>Система в норме</span>
@@ -1155,7 +1297,7 @@ export default function App() {
               {activeTab === 'locomotives' && <LocomotiveList />}
               {activeTab === 'assignments' && <AssignmentManager />}
               {activeTab === 'import' && <ImportPage />}
-              {activeTab === 'conflicts' && <ConflictsPage />}
+              {activeTab === 'conflicts' && <ConflictsPage setActiveTab={setActiveTab} />}
               {activeTab === 'trains' && (
                 <div className="flex flex-col items-center justify-center h-[60vh] text-slate-400">
                   <TrainIcon size={64} className="mb-4 opacity-20" />

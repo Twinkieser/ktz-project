@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dayjs from 'dayjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,7 +42,16 @@ db.exec(`
     fuel_level REAL DEFAULT 100.0,
     sand_level REAL DEFAULT 100.0,
     last_service_hours REAL DEFAULT 0.0,
-    total_hours REAL DEFAULT 0.0
+    total_hours REAL DEFAULT 0.0,
+    max_run_km INTEGER NOT NULL DEFAULT 1200,
+    max_run_hours INTEGER NOT NULL DEFAULT 16,
+    run_km_since_service INTEGER NOT NULL DEFAULT 0,
+    run_hours_since_service REAL NOT NULL DEFAULT 0,
+    fuel_capacity REAL NOT NULL DEFAULT 1000,
+    fuel_current REAL NOT NULL DEFAULT 800,
+    fuel_rate_per_km REAL NOT NULL DEFAULT 2.5,
+    home_depot_station_id INTEGER NULL,
+    last_service_time TEXT NULL
   );
 
   CREATE TABLE IF NOT EXISTS schedules (
@@ -60,14 +70,46 @@ db.exec(`
     shoulder_id INTEGER REFERENCES shoulders(id),
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
-    status TEXT CHECK(status IN ('planned', 'active', 'completed', 'conflict')) DEFAULT 'planned',
+    status TEXT CHECK(status IN ('planned', 'active', 'completed', 'conflict', 'violation')) DEFAULT 'planned',
     conflict_reason TEXT,
+    violation_reason TEXT,
+    distance_km INTEGER NULL,
+    required_fuel REAL NULL,
+    requires_service INTEGER NOT NULL DEFAULT 0,
     note TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_assignments_loco_time ON assignments(locomotive_id, start_time, end_time);
   CREATE INDEX IF NOT EXISTS idx_assignments_status ON assignments(status);
+`);
 
+// Migration for existing tables
+const addColumn = (table: string, column: string, definition: string) => {
+  try {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+  } catch (e) {
+    // Column probably already exists
+  }
+};
+
+// Locomotives migrations
+addColumn('locomotives', 'max_run_km', 'INTEGER NOT NULL DEFAULT 1200');
+addColumn('locomotives', 'max_run_hours', 'INTEGER NOT NULL DEFAULT 16');
+addColumn('locomotives', 'run_km_since_service', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('locomotives', 'run_hours_since_service', 'REAL NOT NULL DEFAULT 0');
+addColumn('locomotives', 'fuel_capacity', 'REAL NOT NULL DEFAULT 1000');
+addColumn('locomotives', 'fuel_current', 'REAL NOT NULL DEFAULT 800');
+addColumn('locomotives', 'fuel_rate_per_km', 'REAL NOT NULL DEFAULT 2.5');
+addColumn('locomotives', 'home_depot_station_id', 'INTEGER NULL');
+addColumn('locomotives', 'last_service_time', 'TEXT NULL');
+
+// Assignments migrations
+addColumn('assignments', 'violation_reason', 'TEXT NULL');
+addColumn('assignments', 'distance_km', 'INTEGER NULL');
+addColumn('assignments', 'required_fuel', 'REAL NULL');
+addColumn('assignments', 'requires_service', 'INTEGER NOT NULL DEFAULT 0');
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS service_points (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     station_id INTEGER REFERENCES stations(id),
@@ -153,6 +195,24 @@ if (stationCount.count === 0) {
     [4, 'fuel', 45]
   ];
   servicePoints.forEach(sp => insertServicePoint.run(sp[0], sp[1], sp[2]));
+}
+
+// Seed assignments if empty
+const assignmentCount = db.prepare('SELECT COUNT(*) as count FROM assignments').get() as { count: number };
+if (assignmentCount.count === 0) {
+  const insertAssignment = db.prepare(`
+    INSERT INTO assignments (locomotive_id, train_id, shoulder_id, start_time, end_time, status, distance_km, required_fuel)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  const now = dayjs();
+  const assignments = [
+    [1, 1, 1, now.subtract(2, 'hour').toISOString(), now.add(10, 'hour').toISOString(), 'active', 1200, 300],
+    [3, 3, 3, now.subtract(5, 'hour').toISOString(), now.subtract(1, 'hour').toISOString(), 'completed', 200, 50],
+    [5, 5, 5, now.add(1, 'hour').toISOString(), now.add(15, 'hour').toISOString(), 'planned', 1500, 400],
+    [1, 2, 2, now.add(12, 'hour').toISOString(), now.add(24, 'hour').toISOString(), 'planned', 1200, 300]
+  ];
+  assignments.forEach(a => insertAssignment.run(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]));
 }
 
 export default db;

@@ -2,7 +2,23 @@ import {
   Locomotive, Train, Shoulder, Assignment, DashboardKPIs, Station 
 } from './types';
 
-const API_BASE = '/api';
+const getBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (!envUrl) return "";
+  
+  // If we're in a browser and the env URL is localhost but the current page isn't,
+  // default to relative paths to avoid "Failed to fetch"
+  if (typeof window !== 'undefined' && 
+      envUrl.includes('localhost') && 
+      !window.location.hostname.includes('localhost')) {
+    return "";
+  }
+  
+  return envUrl;
+};
+
+const API_BASE_URL = getBaseUrl();
+const API_BASE = `${API_BASE_URL}/api`;
 
 const handleResponse = async (res: Response) => {
   const contentType = res.headers.get('content-type');
@@ -18,6 +34,7 @@ const handleResponse = async (res: Response) => {
 };
 
 export const api = {
+  checkHealth: () => fetch(`${API_BASE}/health`).then(handleResponse),
   getLocomotives: () => fetch(`${API_BASE}/locomotives`).then(handleResponse),
   getTrains: () => fetch(`${API_BASE}/trains`).then(handleResponse),
   getShoulders: () => fetch(`${API_BASE}/shoulders`).then(handleResponse),
@@ -52,6 +69,11 @@ export const api = {
       body: formData
     }).then(handleResponse);
   },
+  performService: (id: number, data: { station_id: number, service_type: string }) => fetch(`${API_BASE}/locomotives/${id}/service`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }).then(handleResponse),
   createAssignment: (data: any) => fetch(`${API_BASE}/assignments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
