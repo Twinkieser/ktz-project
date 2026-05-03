@@ -29,7 +29,9 @@ db.exec(`
     station_b_id INTEGER REFERENCES stations(id),
     distance_km REAL NOT NULL,
     allowed_loco_models TEXT,
-    min_turnaround_mins INTEGER DEFAULT 60
+    min_turnaround_mins INTEGER DEFAULT 60,
+    region TEXT DEFAULT 'Main',
+    is_active INTEGER DEFAULT 1
   );
 
   CREATE TABLE IF NOT EXISTS locomotives (
@@ -50,8 +52,12 @@ db.exec(`
     fuel_capacity REAL NOT NULL DEFAULT 1000,
     fuel_current REAL NOT NULL DEFAULT 800,
     fuel_rate_per_km REAL NOT NULL DEFAULT 2.5,
+    sand_capacity REAL NOT NULL DEFAULT 500,
+    sand_current REAL NOT NULL DEFAULT 400,
+    service_duration_hours REAL NOT NULL DEFAULT 4,
     home_depot_station_id INTEGER NULL,
-    last_service_time TEXT NULL
+    last_service_time TEXT NULL,
+    last_sand_time TEXT NULL
   );
 
   CREATE TABLE IF NOT EXISTS schedules (
@@ -76,6 +82,9 @@ db.exec(`
     distance_km INTEGER NULL,
     required_fuel REAL NULL,
     requires_service INTEGER NOT NULL DEFAULT 0,
+    idle_cost REAL DEFAULT 0,
+    ranking_score REAL DEFAULT 0,
+    confirmed INTEGER DEFAULT 0,
     note TEXT
   );
 
@@ -92,6 +101,10 @@ const addColumn = (table: string, column: string, definition: string) => {
   }
 };
 
+// Shoulders migrations
+addColumn('shoulders', 'region', "TEXT DEFAULT 'Main'");
+addColumn('shoulders', 'is_active', 'INTEGER DEFAULT 1');
+
 // Locomotives migrations
 addColumn('locomotives', 'max_run_km', 'INTEGER NOT NULL DEFAULT 1200');
 addColumn('locomotives', 'max_run_hours', 'INTEGER NOT NULL DEFAULT 16');
@@ -100,14 +113,21 @@ addColumn('locomotives', 'run_hours_since_service', 'REAL NOT NULL DEFAULT 0');
 addColumn('locomotives', 'fuel_capacity', 'REAL NOT NULL DEFAULT 1000');
 addColumn('locomotives', 'fuel_current', 'REAL NOT NULL DEFAULT 800');
 addColumn('locomotives', 'fuel_rate_per_km', 'REAL NOT NULL DEFAULT 2.5');
+addColumn('locomotives', 'sand_capacity', 'REAL NOT NULL DEFAULT 500');
+addColumn('locomotives', 'sand_current', 'REAL NOT NULL DEFAULT 400');
+addColumn('locomotives', 'service_duration_hours', 'REAL NOT NULL DEFAULT 4');
 addColumn('locomotives', 'home_depot_station_id', 'INTEGER NULL');
 addColumn('locomotives', 'last_service_time', 'TEXT NULL');
+addColumn('locomotives', 'last_sand_time', 'TEXT NULL');
 
 // Assignments migrations
 addColumn('assignments', 'violation_reason', 'TEXT NULL');
 addColumn('assignments', 'distance_km', 'INTEGER NULL');
 addColumn('assignments', 'required_fuel', 'REAL NULL');
 addColumn('assignments', 'requires_service', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('assignments', 'idle_cost', 'REAL DEFAULT 0');
+addColumn('assignments', 'ranking_score', 'REAL DEFAULT 0');
+addColumn('assignments', 'confirmed', 'INTEGER DEFAULT 0');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS service_points (

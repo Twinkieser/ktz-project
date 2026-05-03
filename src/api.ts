@@ -3,6 +3,16 @@ import {
 } from './types';
 
 const getBaseUrl = () => {
+  // In AI Studio Preview, we should ALWAYS use relative paths
+  // because the frontend and backend are served through the same proxy.
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    if (hostname.endsWith('.run.app') || hostname.includes('aistudio-solutions.com')) {
+      console.log("[API] AI Studio environment detected, using relative paths.");
+      return "";
+    }
+  }
+
   const envUrl = import.meta.env.VITE_API_BASE_URL;
   if (!envUrl) return "";
   
@@ -29,54 +39,68 @@ const handleResponse = async (res: Response) => {
   } else {
     const text = await res.text();
     if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
-    return text; // Or throw if we strictly expect JSON
+    return text;
+  }
+};
+
+const safeFetch = async (url: string, options?: RequestInit) => {
+  try {
+    const response = await fetch(url, options);
+    return await handleResponse(response);
+  } catch (error: any) {
+    console.error(`[API Error] Fetch failed for ${url}:`, error);
+    // Re-throw a more descriptive error
+    if (error.message === 'Failed to fetch') {
+      throw new Error(`Не удалось подключиться к API (${url}). Проверьте, запущен ли сервер.`);
+    }
+    throw error;
   }
 };
 
 export const api = {
-  checkHealth: () => fetch(`${API_BASE}/health`).then(handleResponse),
-  getLocomotives: () => fetch(`${API_BASE}/locomotives`).then(handleResponse),
-  getTrains: () => fetch(`${API_BASE}/trains`).then(handleResponse),
-  getShoulders: () => fetch(`${API_BASE}/shoulders`).then(handleResponse),
-  getAssignments: () => fetch(`${API_BASE}/assignments`).then(handleResponse),
-  getDashboardKPIs: () => fetch(`${API_BASE}/dashboard/kpis`).then(handleResponse),
-  getStations: () => fetch(`${API_BASE}/stations`).then(handleResponse),
-  getRecommendations: (shoulderId: number) => fetch(`${API_BASE}/recommend/${shoulderId}`).then(handleResponse),
+  checkHealth: () => safeFetch(`${API_BASE}/health`),
+  getLocomotives: () => safeFetch(`${API_BASE}/locomotives`),
+  getTrains: () => safeFetch(`${API_BASE}/trains`),
+  getShoulders: () => safeFetch(`${API_BASE}/shoulders`),
+  getAssignments: () => safeFetch(`${API_BASE}/assignments`),
+  getDashboardKPIs: () => safeFetch(`${API_BASE}/dashboard/kpis`),
+  getStations: () => safeFetch(`${API_BASE}/stations`),
+  getRecommendations: (shoulderId: number) => safeFetch(`${API_BASE}/recommend/${shoulderId}`),
   getGraphData: (from?: string, to?: string) => {
     const params = new URLSearchParams();
     if (from) params.append('from', from);
     if (to) params.append('to', to);
-    return fetch(`${API_BASE}/graph?${params}`).then(handleResponse);
+    return safeFetch(`${API_BASE}/graph?${params}`);
   },
-  getConflicts: () => fetch(`${API_BASE}/conflicts`).then(handleResponse),
+  getConflicts: () => safeFetch(`${API_BASE}/conflicts`),
   getEfficiency: (from?: string, to?: string) => {
     const params = new URLSearchParams();
     if (from) params.append('from', from);
     if (to) params.append('to', to);
-    return fetch(`${API_BASE}/efficiency?${params}`).then(handleResponse);
+    return safeFetch(`${API_BASE}/efficiency?${params}`);
   },
   getOptimization: (from?: string, to?: string) => {
     const params = new URLSearchParams();
     if (from) params.append('from', from);
     if (to) params.append('to', to);
-    return fetch(`${API_BASE}/optimization?${params}`).then(handleResponse);
+    return safeFetch(`${API_BASE}/optimization?${params}`);
   },
   importAssignments: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return fetch(`${API_BASE}/import/assignments`, {
+    return safeFetch(`${API_BASE}/import/assignments`, {
       method: 'POST',
       body: formData
-    }).then(handleResponse);
+    });
   },
-  performService: (id: number, data: { station_id: number, service_type: string }) => fetch(`${API_BASE}/locomotives/${id}/service`, {
+  performService: (id: number, data: { station_id: number, service_type: string }) => safeFetch(`${API_BASE}/locomotives/${id}/service`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
-  }).then(handleResponse),
-  createAssignment: (data: any) => fetch(`${API_BASE}/assignments`, {
+  }),
+  createAssignment: (data: any) => safeFetch(`${API_BASE}/assignments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
-  }).then(handleResponse),
+  }),
 };

@@ -578,59 +578,132 @@ async function startServer() {
   app.post('/api/assignments', (req, res) => {
     const { locomotive_id, train_id, shoulder_id, start_time, end_time, note } = req.body;
     
-    // Conflict check before insert
+    const loco = db.prepare('SELECT * FROM locomotives WHERE id = ?').get(locomotive_id) as any;
+    const shoulder = db.prepare('SELECT * FROM shoulders WHERE id = ?').get(shoulder_id) as any;
+
+    if (!loco || !shoulder) return res.status(404).json({ error: 'Loco or Shoulder not found' });
+
+    // Advanced Validation
+    let status = 'planned';
+    let violation_reason = null;
+    let conflict_reason = null;
+
+    // 1. Location check
+    if (loco.current_station_id !== shoulder.station_a_id) {
+      status = 'violation';
+      violation_reason = 'Локомотив находится на другой станции';
+    }
+
+    // 2. Fuel check
+    const required_fuel = shoulder.distance_km * loco.fuel_rate_per_km;
+    if (loco.fuel_current < required_fuel) {
+      status = 'violation';
+      violation_reason = 'Недостаточно топлива для рейса';
+    }
+
+    // 3. Maintenance check
+    const durationHours = dayjs(end_time).diff(dayjs(start_time), 'hour', true);
+    if (loco.run_hours_since_service + durationHours > loco.max_run_hours) {
+      status = 'violation';
+      violation_reason = 'Превышен лимит часов до ТО';
+    }
+
+    // 4. Conflict check
     const existing = db.prepare(`
       SELECT id FROM assignments 
       WHERE locomotive_id = ? 
       AND start_time < ? AND end_time > ?
     `).get(locomotive_id, end_time, start_time) as any;
 
-    let status = 'planned';
-    let conflict_reason = null;
-
     if (existing) {
       status = 'conflict';
-      conflict_reason = 'Time overlap';
+      conflict_reason = 'Пересечение по времени с другой подвязкой';
     }
 
     const result = db.prepare(`
-      INSERT INTO assignments (locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason, note)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason, note);
+      INSERT INTO assignments (locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason, violation_reason, note, distance_km, required_fuel)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(locomotive_id, train_id, shoulder_id, start_time, end_time, status, conflict_reason, violation_reason, note, shoulder.distance_km, required_fuel);
 
-    res.json({ id: result.lastInsertRowid, status, conflict_reason });
+    // Audit log
+    db.prepare('INSERT INTO audit_logs (action, details) VALUES (?, ?)').run(
+      'CREATE_ASSIGNMENT', 
+      JSON.stringify({ id: result.lastInsertRowid, status, violation_reason })
+    );
+
+    res.json({ id: result.lastInsertRowid, status, conflict_reason, violation_reason });
   });
 
-  // Recommendations
+  // Recommendations with optimization
   app.get('/api/recommend/:shoulder_id', (req, res) => {
     const shoulderId = req.params.shoulder_id;
     const shoulder = db.prepare('SELECT * FROM shoulders WHERE id = ?').get(shoulderId) as any;
     
     if (!shoulder) return res.status(404).json({ error: 'Shoulder not found' });
 
-    const allowedModels = shoulder.allowed_loco_models.split(',');
+    const allowedModels = shoulder.allowed_loco_models.split(',').map((m: string) => m.trim());
     
-    // Find locos at start station or nearby
+    // Find locos
     const candidates = db.prepare(`
       SELECT l.*, s.name as current_station_name
       FROM locomotives l
       JOIN stations s ON l.current_station_id = s.id
-      WHERE l.status = 'idle'
+      WHERE l.status IN ('idle', 'enroute')
     `).all() as any[];
 
+    const IDLE_COST_PER_HOUR = 5000; // KZT
+
     const scored = candidates.map(loco => {
-      let score = 0;
-      const isAllowed = allowedModels.includes(loco.model);
+      let score = 100;
+      const reasons: string[] = [];
+
+      // 1. Model match
+      if (!allowedModels.includes(loco.model) && allowedModels[0] !== 'Any') {
+        return null;
+      }
+
+      // 2. Physical location
       const isAtStation = loco.current_station_id === shoulder.station_a_id;
-      
-      if (!isAllowed) return null;
-      
-      if (isAtStation) score += 50;
-      score += (loco.fuel_level / 2); // More fuel is better
-      score += (loco.sand_level / 4);
-      
-      return { ...loco, score };
-    }).filter(c => c !== null).sort((a, b) => b.score - a.score).slice(0, 3);
+      if (!isAtStation) {
+        score -= 40;
+        reasons.push('Не на станции отправления');
+      } else {
+        score += 20;
+      }
+
+      // 3. Fuel check
+      const requiredFuel = shoulder.distance_km * loco.fuel_rate_per_km;
+      if (loco.fuel_current < requiredFuel) {
+        score -= 60;
+        reasons.push('Недостаточно топлива');
+      } else {
+        score += 10;
+      }
+
+      // 4. Maintenance check
+      if (loco.run_hours_since_service + (shoulder.distance_km / 60) > loco.max_run_hours) {
+        score -= 80;
+        reasons.push('Требуется ТО');
+      }
+
+      // 5. Idle time calculation (if idle)
+      let idleHours = 0;
+      if (loco.status === 'idle') {
+        // Mock idle time for now or get from last assignment
+        idleHours = 5; 
+        score += (idleHours * 2);
+      }
+
+      const idleCost = idleHours * IDLE_COST_PER_HOUR;
+
+      return { 
+        ...loco, 
+        score: Math.max(0, score), 
+        reasons,
+        idle_cost: idleCost,
+        required_fuel: requiredFuel
+      };
+    }).filter(c => c !== null).sort((a, b) => b.score - a.score).slice(0, 5);
 
     res.json(scored);
   });
@@ -649,6 +722,24 @@ async function startServer() {
           CAST(SUM(strftime('%s', end_time) - strftime('%s', start_time)) AS REAL) / (7 * 24 * 3600) * 100 as efficiency
         FROM assignments
         WHERE start_time > datetime('now', '-7 days')
+        GROUP BY locomotive_id
+      )
+    `).get() as any;
+
+    const idleStats = db.prepare(`
+      SELECT AVG(idle_hours) as avg_idle
+      FROM (
+        SELECT locomotive_id, SUM(idle_cost) / 5000 as idle_hours
+        FROM assignments
+        GROUP BY locomotive_id
+      )
+    `).get() as any;
+
+    const turnover = db.prepare(`
+      SELECT AVG(turnover_hours) as avg_turnover
+      FROM (
+        SELECT locomotive_id, AVG(strftime('%s', end_time) - strftime('%s', start_time)) / 3600 as turnover_hours
+        FROM assignments
         GROUP BY locomotive_id
       )
     `).get() as any;
@@ -673,12 +764,26 @@ async function startServer() {
       reserve: (db.prepare("SELECT COUNT(*) as count FROM locomotives WHERE status = 'idle'").get() as any)?.count || 0,
     };
 
+    const totalLocos = locoStats.working + locoStats.service + locoStats.reserve;
+    const reservePercent = totalLocos > 0 ? (locoStats.reserve / totalLocos) * 100 : 0;
+
+    // Trend (Last 7 days)
+    const trend = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = dayjs().subtract(i, 'day').format('YYYY-MM-DD');
+      trend.push({ date, value: Math.floor(Math.random() * 20) + 70 }); // Mock trend
+    }
+
     res.json({
       completed_rate: totalAssignments.count > 0 ? (completedAssignments.count / totalAssignments.count) * 100 : 0,
       fleet_efficiency: (efficiency?.avg_eff || 0).toFixed(1),
       busiest_loco: busiest?.number || 'N/A',
       idlest_loco: idlest?.number || 'N/A',
       conflict_count: conflicts.count || 0,
+      avg_idle_hours: (idleStats?.avg_idle || 0).toFixed(1),
+      avg_turnover_hours: (turnover?.avg_turnover || 0).toFixed(1),
+      reserve_percent: reservePercent.toFixed(1),
+      efficiency_trend: trend,
       loco_stats: locoStats
     });
   });

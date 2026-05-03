@@ -28,6 +28,8 @@ export interface Shoulder {
   distance_km: number;
   allowed_loco_models: string; // Comma separated
   min_turnaround_mins: number;
+  region: string;
+  is_active: number;
   station_a_name?: string;
   station_b_name?: string;
 }
@@ -50,8 +52,12 @@ export interface Locomotive {
   fuel_capacity: number;
   fuel_current: number;
   fuel_rate_per_km: number;
+  sand_capacity: number;
+  sand_current: number;
+  service_duration_hours: number;
   home_depot_station_id?: number;
   last_service_time?: string;
+  last_sand_time?: string;
   current_station_name?: string;
 }
 
@@ -78,9 +84,13 @@ export interface Assignment {
   distance_km?: number;
   required_fuel?: number;
   requires_service: number;
+  idle_cost: number;
+  ranking_score: number;
+  confirmed: number;
   loco_number?: string;
   train_number?: string;
   shoulder_name?: string;
+  note?: string;
 }
 
 export interface ServicePoint {
@@ -106,6 +116,10 @@ export interface DashboardKPIs {
   busiest_loco: string;
   idlest_loco: string;
   conflict_count: number;
+  avg_idle_hours: string;
+  avg_turnover_hours: string;
+  reserve_percent: string;
+  efficiency_trend: { date: string; value: number }[];
   loco_stats: {
     working: number;
     service: number;
